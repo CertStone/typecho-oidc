@@ -4,19 +4,37 @@ namespace TypechoPlugin\Oidc;
 use Exception;
 use Typecho\Common;
 use Typecho\Db;
-use Typecho\Widget;
 use Widget\ActionInterface;
+use Widget\Base;
 use Widget\Notice;
-use Widget\Options;
-use Widget\Security;
-use Widget\User;
 
 if (!defined('__TYPECHO_ROOT_DIR__')) {
     exit;
 }
 
-class Action extends Widget implements ActionInterface
+class Action extends Base implements ActionInterface
 {
+    /**
+     * 插件配置
+     */
+    protected $pluginConfig;
+
+    /**
+     * 提示框组件
+     */
+    protected $notice;
+
+    /**
+     * 初始化组件
+     */
+    protected function init()
+    {
+        parent::init();
+        $this->pluginConfig = $this->options->plugin('Oidc');
+        $this->notice = Notice::alloc();
+    }
+
+
     // ==================== 公共接口方法 ====================
 
     /**
@@ -25,17 +43,14 @@ class Action extends Widget implements ActionInterface
      */
     public function action()
     {
-        $options = Options::alloc();
-
         // 检查用户是否登录
-        $user = User::alloc();
-        if (!$user->hasLogin()) {
-            $this->response->redirect(Common::url('admin/login.php', $options->index));
+        if (!$this->user->hasLogin()) {
+            $this->response->redirect(Common::url('admin/login.php', $this->options->index));
             exit;
         }
 
         // CSRF 保护
-        Security::alloc()->protect();
+        $this->security->protect();
 
         $do = $this->request->get('do');
 
@@ -49,13 +64,6 @@ class Action extends Widget implements ActionInterface
         }
     }
 
-    /**
-     * 执行接口
-     */
-    public function execute()
-    {
-    }
-
     // ==================== 公共操作方法 ====================
 
     /**
@@ -63,11 +71,8 @@ class Action extends Widget implements ActionInterface
      */
     public function login()
     {
-        $options = Options::alloc();
-        $pluginConfig = $options->plugin('Oidc');
-
         // 检查配置是否完整
-        if (empty($pluginConfig->discoveryUrl) && empty($pluginConfig->clientId)) {
+        if (empty($this->pluginConfig->discoveryUrl) && empty($this->pluginConfig->clientId)) {
             $this->loginError('OIDC 配置不完整，请联系管理员');
         }
 
@@ -84,23 +89,23 @@ class Action extends Widget implements ActionInterface
         );
 
         // 构建授权 URL
-        $redirectUri = Common::url('/oidc/callback', $options->index);
+        $redirectUri = Common::url('/oidc/callback', $this->options->index);
 
         // 获取授权端点
-        $discoveryData = $this->getDiscoveryData($pluginConfig->discoveryUrl);
+        $discoveryData = $this->getDiscoveryData();
         if ($discoveryData && isset($discoveryData['authorization_endpoint'])) {
             $authorizeUrl = $discoveryData['authorization_endpoint'];
         } else {
             $this->loginError('无法获取 OIDC 授权端点');
         }
 
-        $authorizeUrl .= '?client_id=' . urlencode($pluginConfig->clientId);
+        $authorizeUrl .= '?client_id=' . urlencode($this->pluginConfig->clientId);
         $authorizeUrl .= '&response_type=code';
         $authorizeUrl .= '&redirect_uri=' . urlencode($redirectUri);
-        $authorizeUrl .= '&scope=' . urlencode($pluginConfig->scope);
+        $authorizeUrl .= '&scope=' . urlencode($this->pluginConfig->scope);
         $authorizeUrl .= '&state=' . urlencode($state);
 
-        // 重定向到 OAuth2 授权页面
+        // 重定向到 OIDC 授权页面
         $this->response->redirect($authorizeUrl);
     }
 
@@ -109,9 +114,6 @@ class Action extends Widget implements ActionInterface
      */
     public function callback()
     {
-        $options = Options::alloc();
-        $pluginConfig = $options->plugin('Oidc');
-
         // 获取 code 和 state
         $code = $this->request->get('code');
         $state = $this->request->get('state');
@@ -129,39 +131,35 @@ class Action extends Widget implements ActionInterface
         }
 
         // 获取 token
-        $tokenData = $this->getAccessToken($code, $state, $options, $pluginConfig);
+        $tokenData = $this->getAccessToken($code);
 
         if (empty($tokenData) || empty($tokenData['access_token'])) {
             $this->loginError('获取 Access Token 失败');
         }
 
         // 使用 Access Token 获取用户信息
-        $userInfo = $this->getUserInfo($tokenData['access_token'], $pluginConfig);
+        $userInfo = $this->getUserInfo($tokenData['access_token']);
         if (empty($userInfo)) {
             $this->loginError('获取用户信息失败');
         }
 
         // 添加 issuer（从 discovery 获取）
         if (empty($userInfo['iss'])) {
-            $discoveryData = $this->getDiscoveryData($pluginConfig->discoveryUrl);
+            $discoveryData = $this->getDiscoveryData();
             if (!empty($discoveryData['issuer'])) {
                 $userInfo['iss'] = $discoveryData['issuer'];
             }
         }
 
         // 处理用户登录
-        $this->processUserLogin($userInfo, $options);
+        $this->processUserLogin($userInfo);
     }
 
     /**
      * 解绑 OIDC 账户
-     * 注意：登录检查和 CSRF 保护已在 action() 方法中完成
      */
     public function unbind()
     {
-        $options = Options::alloc();
-        $user = User::alloc();
-
         $bindingId = $this->request->get('binding_id');
         if (empty($bindingId)) {
             $bindingId = $this->request->post('binding_id');
@@ -169,8 +167,8 @@ class Action extends Widget implements ActionInterface
         $bindingId = intval($bindingId);
 
         if ($bindingId <= 0) {
-            Notice::alloc()->set(_t('无效的绑定ID'), 'error');
-            $this->response->redirect(Common::url('admin/extending.php?panel=Oidc%2FPanel.php', $options->index));
+            $this->notice->set(_t('无效的绑定ID'), 'error');
+            $this->response->redirect(Common::url('admin/extending.php?panel=Oidc%2FPanel.php', $this->options->index));
             exit;
         }
 
@@ -182,17 +180,17 @@ class Action extends Widget implements ActionInterface
             $db->query(
                 $db->delete($prefix . 'oidc_bindings')
                     ->where('id = ?', $bindingId)
-                    ->where('uid = ?', $user->uid)
+                    ->where('uid = ?', $this->user->uid)
             );
 
-            Notice::alloc()->set(_t('解绑成功'), 'success');
+            $this->notice->set(_t('解绑成功'), 'success');
         } catch (Exception $e) {
             error_log('OIDC 解绑错误: ' . $e->getMessage());
-            Notice::alloc()->set(_t('解绑失败: ') . $e->getMessage(), 'error');
+            $this->notice->set(_t('解绑失败，请稍后重试'), 'error');
         }
 
         // 重定向回管理面板
-        $this->response->redirect(Common::url('admin/extending.php?panel=Oidc%2FPanel.php', $options->index));
+        $this->response->redirect(Common::url('admin/extending.php?panel=Oidc%2FPanel.php', $this->options->index));
         exit;
     }
 
@@ -202,9 +200,8 @@ class Action extends Widget implements ActionInterface
      * 处理用户登录
      * 
      * @param array $userInfo 用户信息
-     * @param Options $options Widget_Options 实例
      */
-    private function processUserLogin($userInfo, $options)
+    private function processUserLogin($userInfo)
     {
         // 检查是否有 sub 字段
         if (empty($userInfo['sub'])) {
@@ -234,23 +231,22 @@ class Action extends Widget implements ActionInterface
                 session_regenerate_id(true);
 
                 // 直接登录
-                $user = User::alloc();
-                $user->simpleLogin($binding['uid'], false);
+                $this->user->simpleLogin($binding['uid'], false);
 
-                if ($user->hasLogin()) {
+                if ($this->user->hasLogin()) {
                     // 登录成功，跳转到后台
-                    $adminUrl = Common::url('admin/', $options->index);
+                    $adminUrl = Common::url('admin/', $this->options->index);
                     $this->response->redirect($adminUrl);
                 } else {
                     $this->loginError('登录失败，请重试');
                 }
             } else {
                 // 未找到绑定关系，需要先绑定
-                $this->handleBinding($userInfo, $options);
+                $this->handleBinding($userInfo);
             }
         } catch (Exception $e) {
             error_log('OIDC 登录错误: ' . $e->getMessage());
-            $this->loginError('登录过程中发生错误,请稍后重试');
+            $this->loginError('登录过程中发生错误，请稍后重试');
         }
     }
 
@@ -258,32 +254,15 @@ class Action extends Widget implements ActionInterface
      * 处理绑定流程
      * 
      * @param array $userInfo 用户信息
-     * @param Options $options Widget_Options 实例
      */
-    private function handleBinding($userInfo, $options)
+    private function handleBinding($userInfo)
     {
         // 检查用户是否已经登录
-        $user = User::alloc();
-
-        if ($user->hasLogin()) {
-            // 用户已登录，直接执行绑定
-            $this->performBinding($userInfo, $user->uid, $options);
-            return;
+        if (!$this->user->hasLogin()) {
+            // 用户未登录，提示需要先登录
+            $this->loginError('请先登录 Typecho 账户，然后在 OIDC 绑定管理页面进行绑定');
         }
 
-        // 用户未登录，提示需要先登录
-        $this->loginError('请先登录 Typecho 账户，然后在 OIDC 账户绑定管理页面进行绑定');
-    }
-
-    /**
-     * 执行绑定操作
-     * 
-     * @param array $userInfo OIDC 用户信息
-     * @param int $uid Typecho 用户 ID
-     * @param Options $options Widget_Options 实例
-     */
-    private function performBinding($userInfo, $uid, $options)
-    {
         try {
             $db = Db::get();
             $prefix = $db->getPrefix();
@@ -303,7 +282,7 @@ class Action extends Widget implements ActionInterface
             $db->query(
                 $db->insert($prefix . 'oidc_bindings')
                     ->rows(array(
-                        'uid' => $uid,
+                        'uid' => $this->user->uid,
                         'iss' => $userInfo['iss'],
                         'sub' => $userInfo['sub'],
                         'created_at' => time()
@@ -311,21 +290,20 @@ class Action extends Widget implements ActionInterface
             );
 
             // 确保用户已登录
-            $user = User::alloc();
-            if (!$user->hasLogin()) {
-                $user->simpleLogin($uid, false);
+            if (!$this->user->hasLogin()) {
+                $this->user->simpleLogin($this->user->uid, false);
             }
 
             // 添加成功提示
-            Notice::alloc()->set(_t('OIDC 账户绑定成功'), 'success');
+            $this->notice->set(_t('OIDC 账户绑定成功'), 'success');
 
             // 绑定成功，跳转到 OIDC 绑定管理面板
-            $panelUrl = Common::url('admin/extending.php?panel=Oidc%2FPanel.php', $options->index);
+            $panelUrl = Common::url('admin/extending.php?panel=Oidc%2FPanel.php', $this->options->index);
             $this->response->redirect($panelUrl);
 
         } catch (Exception $e) {
             error_log('OIDC 绑定错误: ' . $e->getMessage());
-            $this->loginError('绑定过程中发生错误: ' . $e->getMessage());
+            $this->loginError('绑定过程中发生错误，请稍后重试');
         }
     }
 
@@ -335,29 +313,21 @@ class Action extends Widget implements ActionInterface
      * 获取访问令牌和 ID Token
      * 
      * @param string $code 授权码
-     * @param string $state state 参数
-     * @param Options $options Widget_Options 实例
-     * @param object $pluginConfig 插件配置
      * @return array|false 包含 access_token 和 id_token 的数组或 false
      */
-    private function getAccessToken($code, $state, $options, $pluginConfig)
+    private function getAccessToken($code)
     {
         // 确定 token 端点 URL
-        if (!empty($pluginConfig->discoveryUrl)) {
-            $discoveryData = $this->getDiscoveryData($pluginConfig->discoveryUrl);
-            if ($discoveryData && isset($discoveryData['token_endpoint'])) {
-                $tokenUrl = $discoveryData['token_endpoint'];
-            } else {
-                return false;
-            }
-        } else {
-            $tokenUrl = rtrim($pluginConfig->oauthUrl, '/') . '/oauth2/token';
+        $discoveryData = $this->getDiscoveryData();
+        if (empty($discoveryData['token_endpoint'])) {
+            error_log('OIDC: 无法获取 Token 端点');
+            return false;
         }
 
-        $redirectUri = Common::url('/oidc/callback', $options->index);
+        $redirectUri = Common::url('/oidc/callback', $this->options->index);
 
         // 构建请求头
-        $authString = $pluginConfig->clientId . ':' . $pluginConfig->clientSecret;
+        $authString = $this->pluginConfig->clientId . ':' . $this->pluginConfig->clientSecret;
         $authHeader = 'Basic ' . base64_encode($authString);
 
         $headers = array(
@@ -370,12 +340,12 @@ class Action extends Widget implements ActionInterface
             'grant_type' => 'authorization_code',
             'code' => $code,
             'redirect_uri' => $redirectUri,
-            'scope' => $pluginConfig->scope
+            'scope' => $this->pluginConfig->scope
         );
 
         // 发送请求
         $ch = curl_init();
-        curl_setopt($ch, CURLOPT_URL, $tokenUrl);
+        curl_setopt($ch, CURLOPT_URL, $discoveryData['token_endpoint']);
         curl_setopt($ch, CURLOPT_POST, true);
         curl_setopt($ch, CURLOPT_POSTFIELDS, http_build_query($postData));
         curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
@@ -415,10 +385,10 @@ class Action extends Widget implements ActionInterface
      * @param object $pluginConfig 插件配置
      * @return array|false 用户信息数组或 false
      */
-    private function getUserInfo($accessToken, $pluginConfig)
+    private function getUserInfo($accessToken)
     {
         // 获取 UserInfo 端点
-        $discoveryData = $this->getDiscoveryData($pluginConfig->discoveryUrl);
+        $discoveryData = $this->getDiscoveryData();
         if (empty($discoveryData['userinfo_endpoint'])) {
             error_log('OIDC: 无法获取 UserInfo 端点');
             return false;
@@ -473,13 +443,13 @@ class Action extends Widget implements ActionInterface
      * @param string $discoveryUrl 发现文档 URL
      * @return array|false 发现文档数据或 false
      */
-    private function getDiscoveryData($discoveryUrl)
+    private function getDiscoveryData()
     {
         // 确保 session 已启动
         $this->startSession();
 
         // 检查是否有缓存
-        $cacheKey = 'oidc_discovery_' . md5($discoveryUrl);
+        $cacheKey = 'oidc_discovery_' . md5($this->pluginConfig->discoveryUrl);
 
         if (isset($_SESSION[$cacheKey])) {
             $data = $_SESSION[$cacheKey];
@@ -490,7 +460,7 @@ class Action extends Widget implements ActionInterface
 
         // 获取发现文档
         $ch = curl_init();
-        curl_setopt($ch, CURLOPT_URL, $discoveryUrl);
+        curl_setopt($ch, CURLOPT_URL, $this->pluginConfig->discoveryUrl);
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
         curl_setopt($ch, CURLOPT_TIMEOUT, 10);
         curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 5);
