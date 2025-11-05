@@ -19,6 +19,7 @@ if (!defined('__TYPECHO_ROOT_DIR__')) {
  * @package Oidc
  * @author uy/sun
  * @version 0.2.0
+ * @since 1.2.0
  * @link https://github.com/he0119/typecho-oidc
  */
 class Plugin implements PluginInterface
@@ -32,11 +33,6 @@ class Plugin implements PluginInterface
      */
     public static function activate()
     {
-        // 校验版本是否为 1.2.0+
-        if (version_compare(Common::VERSION, '1.2.0', '<')) {
-            throw new Exception('此插件仅支持 1.2.0 及以上版本的 Typecho 程序');
-        }
-
         // 注册 Action 路由（用于 unbind 等管理操作）
         Helper::addAction('oidc', 'Oidc_Action');
 
