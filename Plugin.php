@@ -198,26 +198,4 @@ class Plugin implements PluginInterface
     public static function personalConfig(Form $form)
     {
     }
-
-    /**
-     * 渲染登录按钮
-     */
-    public static function renderLoginButton()
-    {
-        $options = Options::alloc();
-        $pluginConfig = $options->plugin('Oidc');
-
-        // 检查配置是否完整
-        if (empty($pluginConfig->discoveryUrl) && empty($pluginConfig->clientId)) {
-            return;
-        }
-
-        // 构建登录 URL
-        $loginUrl = Common::url('/oidc/login', $options->index);
-
-        // 获取系统名称
-        $systemName = !empty($pluginConfig->oidcSystemName) ? $pluginConfig->oidcSystemName : '单点登录';
-
-        echo '<a href="' . $loginUrl . '">' . htmlspecialchars($systemName) . '</a>';
-    }
 }
