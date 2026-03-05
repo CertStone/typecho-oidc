@@ -12,6 +12,7 @@ git clone https://github.com/he0119/typecho-oidc.git Oidc
 ## 使用
 
 启用插件并配置好后，在需要的位置添加指向 `oidc/login` 的按钮即可。
+如果需要完整的自定义登录页，可使用 `oidc/login-page`。
 
 比如 `sidebar.php`
 
@@ -23,4 +24,10 @@ git clone https://github.com/he0119/typecho-oidc.git Oidc
 
 ```php
 <a href="<?php $options->index('oidc/login'); ?>"><?php _e('单点登录'); ?></a>
+```
+
+自定义登录页示例：
+
+```php
+<a href="<?php $options->index('oidc/login-page'); ?>"><?php _e('统一认证登录'); ?></a>
 ```

@@ -37,6 +37,7 @@ class Plugin implements PluginInterface
         // 注册公开路由
         Helper::addRoute('oidc_login', '/oidc/login', 'Oidc_Action', 'login');
         Helper::addRoute('oidc_callback', '/oidc/callback', 'Oidc_Action', 'callback');
+        Helper::addRoute('oidc_login_page', '/oidc/login-page', 'Oidc_Action', 'loginPage');
 
         // 添加管理面板
         Helper::addPanel(1, 'Oidc/Panel.php', _t('OIDC 绑定'), _t('管理 OIDC 账户绑定'), 'subscriber');
@@ -120,6 +121,7 @@ class Plugin implements PluginInterface
         // 移除公开路由
         Helper::removeRoute('oidc_login');
         Helper::removeRoute('oidc_callback');
+        Helper::removeRoute('oidc_login_page');
 
         // 移除管理面板
         Helper::removePanel(1, 'Oidc/Panel.php');
@@ -184,6 +186,51 @@ class Plugin implements PluginInterface
             _t('OIDC 作用域')
         );
         $form->addInput($scope);
+
+        $enableAutoRegister = new Form\Element\Radio(
+            'enableAutoRegister',
+            array('0' => _t('关闭'), '1' => _t('开启')),
+            '0',
+            _t('自动注册'),
+            _t('当未绑定用户时，允许自动创建 Typecho 账户（仅在邮箱已验证时）')
+        );
+        $form->addInput($enableAutoRegister);
+
+        $enablePkce = new Form\Element\Radio(
+            'enablePkce',
+            array('0' => _t('关闭'), '1' => _t('开启')),
+            '0',
+            _t('PKCE 支持'),
+            _t('是否在授权码流程中启用 PKCE（推荐开启）')
+        );
+        $form->addInput($enablePkce);
+
+        $nicknameClaim = new Form\Element\Text(
+            'nicknameClaim',
+            null,
+            'name',
+            _t('昵称 Claim'),
+            _t('用于填充 Typecho 昵称（screenName）的 Claim 名称，可留空')
+        );
+        $form->addInput($nicknameClaim);
+
+        $homepageClaim = new Form\Element\Text(
+            'homepageClaim',
+            null,
+            'website',
+            _t('主页 Claim'),
+            _t('用于填充 Typecho 个人主页（url）的 Claim 名称，可留空')
+        );
+        $form->addInput($homepageClaim);
+
+        $emailClaim = new Form\Element\Text(
+            'emailClaim',
+            null,
+            'email',
+            _t('邮箱 Claim'),
+            _t('用于填充 Typecho 邮箱（mail）的 Claim 名称，可留空')
+        );
+        $form->addInput($emailClaim);
 
     }
 

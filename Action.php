@@ -105,6 +105,16 @@ class Action extends Base implements ActionInterface
         $authorizeUrl .= '&scope=' . urlencode($this->pluginConfig->scope);
         $authorizeUrl .= '&state=' . urlencode($state);
 
+        if ($this->isPkceEnabled()) {
+            $pkcePair = $this->generatePkcePair();
+            $_SESSION['oidc_pkce'] = array(
+                'verifier' => $pkcePair['verifier'],
+                'expires_at' => time() + 300
+            );
+            $authorizeUrl .= '&code_challenge=' . urlencode($pkcePair['challenge']);
+            $authorizeUrl .= '&code_challenge_method=S256';
+        }
+
         // 重定向到 OIDC 授权页面
         $this->response->redirect($authorizeUrl);
     }
@@ -153,6 +163,16 @@ class Action extends Base implements ActionInterface
 
         // 处理用户登录
         $this->processUserLogin($userInfo);
+    }
+
+    /**
+     * 自定义登录页
+     */
+    public function loginPage()
+    {
+        $this->startSession();
+        include dirname(__FILE__) . '/LoginPage.php';
+        exit;
     }
 
     /**
@@ -241,6 +261,15 @@ class Action extends Base implements ActionInterface
                     $this->loginError('登录失败，请重试');
                 }
             } else {
+                if ($this->isAutoRegisterEnabled()) {
+                    $uid = $this->autoRegisterUser($userInfo);
+                    if ($uid) {
+                        $this->bindUser($uid, $userInfo);
+                        $this->loginByUid($uid);
+                        return;
+                    }
+                }
+
                 // 未找到绑定关系，需要先绑定
                 $this->handleBinding($userInfo);
             }
@@ -278,16 +307,7 @@ class Action extends Base implements ActionInterface
                 $this->loginError('该 OIDC 账户已被绑定到其他账户');
             }
 
-            // 创建绑定
-            $db->query(
-                $db->insert($prefix . 'oidc_bindings')
-                    ->rows(array(
-                        'uid' => $this->user->uid,
-                        'iss' => $userInfo['iss'],
-                        'sub' => $userInfo['sub'],
-                        'created_at' => time()
-                    ))
-            );
+            $this->bindUser($this->user->uid, $userInfo);
 
             // 确保用户已登录
             if (!$this->user->hasLogin()) {
@@ -307,6 +327,115 @@ class Action extends Base implements ActionInterface
         }
     }
 
+    /**
+     * 绑定用户与 OIDC 账户
+     *
+     * @param int $uid
+     * @param array $userInfo
+     */
+    private function bindUser($uid, $userInfo)
+    {
+        $db = Db::get();
+        $prefix = $db->getPrefix();
+
+        $db->query(
+            $db->insert($prefix . 'oidc_bindings')
+                ->rows(array(
+                    'uid' => $uid,
+                    'iss' => $userInfo['iss'],
+                    'sub' => $userInfo['sub'],
+                    'created_at' => time()
+                ))
+        );
+    }
+
+    /**
+     * 自动注册用户
+     *
+     * @param array $userInfo
+     * @return int|null
+     */
+    private function autoRegisterUser($userInfo)
+    {
+        $emailClaim = $this->getClaimName('emailClaim');
+        $email = $this->getClaimValue($userInfo, $emailClaim);
+
+        if (empty($email) || !$this->isEmailVerified($userInfo)) {
+            $this->loginError('邮箱未验证或缺失，无法自动注册');
+        }
+
+        $db = Db::get();
+        $prefix = $db->getPrefix();
+
+        $existingEmail = $db->fetchRow(
+            $db->select('uid')->from($prefix . 'users')
+                ->where('mail = ?', $email)
+        );
+        if ($existingEmail) {
+            $this->loginError('该邮箱已被其他账户使用，请使用密码登录后在绑定管理页面绑定 OIDC 账户');
+        }
+
+        $username = $this->normalizeUsername($userInfo['sub']);
+        $username = $this->ensureUniqueUsername($username);
+
+        $screenNameClaim = $this->getClaimName('nicknameClaim');
+        $screenName = $this->getClaimValue($userInfo, $screenNameClaim);
+        if (empty($screenName)) {
+            $screenName = $username;
+        }
+        $screenName = $this->truncateValue($screenName, 32);
+
+        $homepageClaim = $this->getClaimName('homepageClaim');
+        $homepage = $this->getClaimValue($userInfo, $homepageClaim);
+        $homepage = $this->truncateValue($homepage, 200);
+
+        $password = $this->generateRandomPassword();
+
+        $db->query(
+            $db->insert($prefix . 'users')
+                ->rows(array(
+                    'name' => $username,
+                    'password' => Common::hash($password),
+                    'mail' => $email,
+                    'url' => $homepage,
+                    'screenName' => $screenName,
+                    'created' => time(),
+                    'activated' => time(),
+                    'logged' => 0,
+                    'group' => 'subscriber'
+                ))
+        );
+
+        $createdUser = $db->fetchRow(
+            $db->select('uid')->from($prefix . 'users')
+                ->where('name = ?', $username)
+        );
+        if (empty($createdUser['uid'])) {
+            $this->loginError('自动注册失败，请稍后重试');
+        }
+
+        return (int) $createdUser['uid'];
+    }
+
+    /**
+     * 通过 uid 登录
+     *
+     * @param int $uid
+     */
+    private function loginByUid($uid)
+    {
+        session_regenerate_id(true);
+        $this->user->simpleLogin($uid, false);
+
+        if ($this->user->hasLogin()) {
+            $adminUrl = Common::url('admin/', $this->options->index);
+            $this->response->redirect($adminUrl);
+            exit;
+        }
+
+        $this->loginError('登录失败，请重试');
+    }
+
     // ==================== 私有 OIDC 协议方法 ====================
 
     /**
@@ -317,6 +446,7 @@ class Action extends Base implements ActionInterface
      */
     private function getAccessToken($code)
     {
+        $this->startSession();
         // 确定 token 端点 URL
         $discoveryData = $this->getDiscoveryData();
         if (empty($discoveryData['token_endpoint'])) {
@@ -342,6 +472,15 @@ class Action extends Base implements ActionInterface
             'redirect_uri' => $redirectUri,
             'scope' => $this->pluginConfig->scope
         );
+
+        if ($this->isPkceEnabled()) {
+            $pkceVerifier = $this->getPkceVerifier();
+            if (empty($pkceVerifier)) {
+                error_log('OIDC: PKCE 校验失败，缺少 code_verifier');
+                return false;
+            }
+            $postData['code_verifier'] = $pkceVerifier;
+        }
 
         // 发送请求
         $ch = curl_init();
@@ -554,6 +693,219 @@ class Action extends Base implements ActionInterface
 
             session_start();
         }
+    }
+
+    /**
+     * 是否启用自动注册
+     *
+     * @return bool
+     */
+    private function isAutoRegisterEnabled()
+    {
+        return !empty($this->pluginConfig->enableAutoRegister) && $this->pluginConfig->enableAutoRegister === '1';
+    }
+
+    /**
+     * 获取 Claim 名称
+     *
+     * @param string $configKey
+     * @return string|null
+     */
+    private function getClaimName($configKey)
+    {
+        if (empty($this->pluginConfig->$configKey)) {
+            return null;
+        }
+
+        return trim($this->pluginConfig->$configKey);
+    }
+
+    /**
+     * 获取 Claim 值
+     *
+     * @param array $userInfo
+     * @param string|null $claimName
+     * @return string|null
+     */
+    private function getClaimValue($userInfo, $claimName)
+    {
+        if (empty($claimName) || empty($userInfo[$claimName])) {
+            return null;
+        }
+
+        $value = $userInfo[$claimName];
+        if (!is_string($value)) {
+            return null;
+        }
+
+        return trim($value);
+    }
+
+    /**
+     * 判断邮箱是否已验证
+     *
+     * @param array $userInfo
+     * @return bool
+     */
+    private function isEmailVerified($userInfo)
+    {
+        if (!array_key_exists('email_verified', $userInfo)) {
+            return false;
+        }
+
+        $value = $userInfo['email_verified'];
+        if ($value === true || $value === 1 || $value === '1') {
+            return true;
+        }
+
+        if (is_string($value) && strtolower($value) === 'true') {
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * 规范化用户名
+     *
+     * @param string $sub
+     * @return string
+     */
+    private function normalizeUsername($sub)
+    {
+        $sanitized = preg_replace('/[^a-zA-Z0-9_]/', '_', $sub);
+        $sanitized = trim($sanitized, '_');
+
+        if (empty($sanitized)) {
+            $sanitized = 'oidc_' . substr(hash('sha256', $sub), 0, 24);
+        }
+
+        if (strlen($sanitized) > 32) {
+            $sanitized = 'oidc_' . substr(hash('sha256', $sub), 0, 27);
+        }
+
+        return $sanitized;
+    }
+
+    /**
+     * 确保用户名唯一
+     *
+     * @param string $username
+     * @return string
+     */
+    private function ensureUniqueUsername($username)
+    {
+        $db = Db::get();
+        $prefix = $db->getPrefix();
+        $base = $username;
+        $attempt = 0;
+
+        while ($attempt < 5) {
+            $exists = $db->fetchRow(
+                $db->select('uid')->from($prefix . 'users')
+                    ->where('name = ?', $username)
+            );
+
+            if (!$exists) {
+                return $username;
+            }
+
+            $suffix = substr(bin2hex(random_bytes(2)), 0, 4);
+            $availableLength = 32 - strlen($suffix) - 1;
+            $username = substr($base, 0, max(1, $availableLength)) . '_' . $suffix;
+            $attempt++;
+        }
+
+        return 'oidc_' . substr(bin2hex(random_bytes(8)), 0, 24);
+    }
+
+    /**
+     * 生成随机密码
+     *
+     * @return string
+     */
+    private function generateRandomPassword()
+    {
+        return bin2hex(random_bytes(16));
+    }
+
+    /**
+     * 截断字符串
+     *
+     * @param string|null $value
+     * @param int $length
+     * @return string
+     */
+    private function truncateValue($value, $length)
+    {
+        if (empty($value) || !is_string($value)) {
+            return '';
+        }
+
+        if (strlen($value) <= $length) {
+            return $value;
+        }
+
+        return substr($value, 0, $length);
+    }
+
+    /**
+     * 是否启用 PKCE
+     *
+     * @return bool
+     */
+    private function isPkceEnabled()
+    {
+        return !empty($this->pluginConfig->enablePkce) && $this->pluginConfig->enablePkce === '1';
+    }
+
+    /**
+     * 生成 PKCE verifier 和 challenge
+     *
+     * @return array
+     */
+    private function generatePkcePair()
+    {
+        $verifier = $this->base64UrlEncode(random_bytes(32));
+        $challenge = $this->base64UrlEncode(hash('sha256', $verifier, true));
+
+        return array(
+            'verifier' => $verifier,
+            'challenge' => $challenge
+        );
+    }
+
+    /**
+     * 获取 PKCE verifier
+     *
+     * @return string|null
+     */
+    private function getPkceVerifier()
+    {
+        if (empty($_SESSION['oidc_pkce']) || !is_array($_SESSION['oidc_pkce'])) {
+            return null;
+        }
+
+        $data = $_SESSION['oidc_pkce'];
+        if (empty($data['verifier']) || empty($data['expires_at']) || time() > $data['expires_at']) {
+            unset($_SESSION['oidc_pkce']);
+            return null;
+        }
+
+        unset($_SESSION['oidc_pkce']);
+
+        return $data['verifier'];
+    }
+
+    /**
+     * Base64URL 编码
+     *
+     * @param string $input
+     * @return string
+     */
+    private function base64UrlEncode($input)
+    {
+        return rtrim(strtr(base64_encode($input), '+/', '-_'), '=');
     }
 
     /**
