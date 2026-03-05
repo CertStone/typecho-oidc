@@ -26,7 +26,7 @@ $backgroundUrl = !empty($pluginConfig->loginBackgroundUrl) ? $pluginConfig->logi
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
     <title><?php _e('%s 登录', $systemName); ?> - <?php echo htmlspecialchars($options->title); ?></title>
     <meta name="robots" content="noindex, nofollow">
-    <link rel="stylesheet" href="<?php echo $cdnBase; ?>/full.min.css">
+    <link rel="stylesheet" href="<?php echo $cdnBase; ?>/daisyui.min.css">
     <link rel="stylesheet" href="<?php echo $cdnBase; ?>/themes.min.css">
     <style>
         .oidc-hero {
