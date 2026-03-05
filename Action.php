@@ -71,6 +71,9 @@ class Action extends Base implements ActionInterface
      */
     public function login()
     {
+        if (!$this->isPluginEnabled()) {
+            $this->loginError('插件已禁用，请联系管理员');
+        }
         // 检查配置是否完整
         if (empty($this->pluginConfig->discoveryUrl) && empty($this->pluginConfig->clientId)) {
             $this->loginError('OIDC 配置不完整，请联系管理员');
@@ -124,6 +127,9 @@ class Action extends Base implements ActionInterface
      */
     public function callback()
     {
+        if (!$this->isPluginEnabled()) {
+            $this->loginError('插件已禁用，请联系管理员');
+        }
         // 获取 code 和 state
         $code = $this->request->get('code');
         $state = $this->request->get('state');
@@ -170,6 +176,9 @@ class Action extends Base implements ActionInterface
      */
     public function loginPage()
     {
+        if (!$this->isPluginEnabled()) {
+            $this->loginError('插件已禁用，请联系管理员');
+        }
         $this->startSession();
         include dirname(__FILE__) . '/LoginPage.php';
         exit;
@@ -693,6 +702,16 @@ class Action extends Base implements ActionInterface
 
             session_start();
         }
+    }
+
+    /**
+     * 是否启用插件功能
+     *
+     * @return bool
+     */
+    private function isPluginEnabled()
+    {
+        return empty($this->pluginConfig->enablePlugin) || $this->pluginConfig->enablePlugin === '1';
     }
 
     /**

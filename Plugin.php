@@ -157,6 +157,15 @@ class Plugin implements PluginInterface
         );
         $form->addInput($discoveryUrl);
 
+        $enablePlugin = new Form\Element\Radio(
+            'enablePlugin',
+            array('1' => _t('启用'), '0' => _t('禁用')),
+            '1',
+            _t('插件功能开关'),
+            _t('禁用后将停止 OIDC 登录与回调，但保留配置数据')
+        );
+        $form->addInput($enablePlugin);
+
 
         $oidcSystemName = new Form\Element\Text(
             'oidcSystemName',
