@@ -16,7 +16,7 @@ $referer = Common::url('admin/', $options->index);
 $loginUrl = Common::url('/oidc/login', $options->index);
 $cdnBase = !empty($pluginConfig->uiCdnBase) ? rtrim($pluginConfig->uiCdnBase, '/') : 'https://s4.zstatic.net';
 $backgroundUrl = !empty($pluginConfig->loginBackgroundUrl) ? $pluginConfig->loginBackgroundUrl : '';
-$daisyCssUrl = $cdnBase . '/npm/daisyui@5';
+$daisyCssUrl = $cdnBase . '/npm/daisyui@5/daisyui.css';
 $daisyThemeUrl = $cdnBase . '/npm/daisyui@5/themes.css';
 $tailwindBrowserUrl = $cdnBase . '/npm/@tailwindcss/browser@4';
 ?>
