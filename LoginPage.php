@@ -53,11 +53,11 @@ $tailwindBrowserUrl = $cdnBase . '/npm/@tailwindcss/browser@4';
 <body class="min-h-screen">
     <div class="hero min-h-screen bg-base-200"<?php if (!empty($backgroundUrl)) { ?> style="background-image: url('<?php echo htmlspecialchars($backgroundUrl); ?>'); background-size: cover; background-position: center;"<?php } ?> >
         <?php if (!empty($backgroundUrl)) { ?>
-            <div class="hero-overlay bg-base-100/45"></div>
+            <div class="hero-overlay bg-base-100/30"></div>
         <?php } ?>
         <div class="hero-content w-full px-3 py-8 sm:px-6 md:px-8">
-            <div class="w-full max-w-5xl">
-                <div class="card w-full rounded-3xl border border-base-300/40 bg-base-100/95 shadow-2xl backdrop-blur-md">
+            <div class="w-full max-w-[72rem]">
+                <div class="card w-full rounded-3xl border border-base-300/60 bg-base-100 shadow-2xl backdrop-blur-sm">
                     <div class="card-body space-y-5 p-6 sm:p-8 md:p-10">
                         <div class="border-b border-base-300/70 pb-6 text-center space-y-3">
                             <?php if (!empty($logoUrl)) { ?>
@@ -66,7 +66,7 @@ $tailwindBrowserUrl = $cdnBase . '/npm/@tailwindcss/browser@4';
                             <h1 class="text-3xl md:text-4xl font-bold tracking-tight text-base-content">
                                 <?php _e('登录你的账号'); ?>
                             </h1>
-                            <p class="text-sm md:text-base text-base-content/70">
+                            <p class="text-sm md:text-base text-base-content/75">
                                 <?php _e('建议使用 %s', $systemName); ?>
                             </p>
                         </div>
