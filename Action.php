@@ -185,6 +185,11 @@ class Action extends Base implements ActionInterface
             exit;
         }
 
+        if (!$this->shouldKeepNativePasswordLogin()) {
+            $this->login();
+            return;
+        }
+
         $this->startSession();
         include dirname(__FILE__) . '/LoginPage.php';
         exit;
@@ -731,6 +736,16 @@ class Action extends Base implements ActionInterface
     private function isAutoRegisterEnabled()
     {
         return !empty($this->pluginConfig->enableAutoRegister) && $this->pluginConfig->enableAutoRegister === '1';
+    }
+
+    /**
+     * 是否保留本地账号登录入口
+     *
+     * @return bool
+     */
+    private function shouldKeepNativePasswordLogin()
+    {
+        return empty($this->pluginConfig->keepNativePasswordLogin) || $this->pluginConfig->keepNativePasswordLogin === '1';
     }
 
     /**

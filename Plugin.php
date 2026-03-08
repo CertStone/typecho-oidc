@@ -240,6 +240,15 @@ class Plugin implements PluginInterface
         );
         $form->addInput($disableNativeAuthPages);
 
+        $keepNativePasswordLogin = new Form\Element\Radio(
+            'keepNativePasswordLogin',
+            array('1' => _t('保留'), '0' => _t('不保留')),
+            '1',
+            _t('是否保留 Typecho 原生账号登录功能'),
+            _t('“保留”：在 /oidc/login-page 显示本地账号登录表单；“不保留”：访问 /oidc/login-page 时直接跳转到单点登录')
+        );
+        $form->addInput($keepNativePasswordLogin);
+
         $allowUserUnbind = new Form\Element\Radio(
             'allowUserUnbind',
             array('0' => _t('否'), '1' => _t('是')),

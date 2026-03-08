@@ -59,6 +59,9 @@ git clone https://github.com/CertStone/typecho-oidc.git Oidc
 - `自动注册`：开启后，未绑定用户可自动创建 Typecho 账户（要求 `email_verified=true`）
 - `OIDC 自动注册用户组`：可选 `subscriber / contributor / editor`
 - `是否禁用 Typecho 原生登录和注册页`：开启后，访问原生 `login.php` / `register.php` 会跳转到 `/oidc/login-page`（兼容自定义后台目录）
+- `是否保留 Typecho 原生账号登录功能`：
+  - 保留：`/oidc/login-page` 同时展示“单点登录 + 本地账号登录”
+  - 不保留：访问 `/oidc/login-page` 将直接跳转到单点登录，不再展示本地账号登录表单
 - `是否允许用户解绑 OIDC 账户`：默认“否”，适用于强制 SSO 场景
 
 > 说明：出于安全考虑，自动注册用户组不建议直接使用高权限组。建议先以低权限组接入，再由管理员后台调整权限。
@@ -71,12 +74,20 @@ git clone https://github.com/CertStone/typecho-oidc.git Oidc
 2. 开启自动注册（建议开启，以避免首次登录用户无本地入口导致无法完成接入）
 3. 设置 `OIDC 自动注册用户组`（通常为 `subscriber` 或 `contributor`）
 4. 开启 `是否禁用 Typecho 原生登录和注册页`
-5. 保持 `是否允许用户解绑 OIDC 账户 = 否`
+5. 将 `是否保留 Typecho 原生账号登录功能` 设为“不保留”
+6. 保持 `是否允许用户解绑 OIDC 账户 = 否`
 
 这样可以实现：
 - 原生登录/注册页不可用
 - 账号生命周期由 IdP + OIDC 绑定关系主导
 - 用户无法自行解除绑定绕过 SSO 策略
+
+### 两个登录相关开关的语义
+
+- `是否禁用 Typecho 原生登录和注册页`：控制原生 `login.php/register.php` 页面入口是否重定向到 `/oidc/login-page`
+- `是否保留 Typecho 原生账号登录功能`：控制 `/oidc/login-page` 是否显示本地账号登录表单
+
+> 注意：这两个开关主要控制“页面入口与展示层”。若要实现严格意义上的“仅允许 SSO、禁止一切密码登录请求”，还需在网关层（Nginx/Apache/WAF）限制原生登录 action 端点。
 
 ## IdP 配置说明
 

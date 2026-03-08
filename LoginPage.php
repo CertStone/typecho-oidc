@@ -11,8 +11,8 @@ if (!defined('__TYPECHO_ROOT_DIR__')) {
 $options = Options::alloc();
 $pluginConfig = $options->plugin('Oidc');
 $systemName = !empty($pluginConfig->oidcSystemName) ? $pluginConfig->oidcSystemName : 'OIDC';
-$nativeAuthDisabled = !empty($pluginConfig->disableNativeAuthPages) && $pluginConfig->disableNativeAuthPages === '1';
-$loginAction = $nativeAuthDisabled ? Common::url('/oidc/login', $options->index) : $options->loginAction;
+$keepNativePasswordLogin = empty($pluginConfig->keepNativePasswordLogin) || $pluginConfig->keepNativePasswordLogin === '1';
+$loginAction = $options->loginAction;
 $referer = $options->adminUrl;
 $loginUrl = Common::url('/oidc/login', $options->index);
 $cdnBase = !empty($pluginConfig->uiCdnBase) ? rtrim($pluginConfig->uiCdnBase, '/') : 'https://s4.zstatic.net';
@@ -89,7 +89,7 @@ $tailwindBrowserUrl = $cdnBase . '/npm/@tailwindcss/browser@4';
                             <?php _e('从 %s 登录/注册', $systemName); ?>
                         </a>
 
-                        <?php if (!$nativeAuthDisabled) { ?>
+                        <?php if ($keepNativePasswordLogin) { ?>
                             <div class="divider text-xs text-base-content/50 my-1"><?php _e('或使用本地账户'); ?></div>
 
                             <form id="oidc-local-login-form" action="<?php echo htmlspecialchars($loginAction); ?>" method="post" name="login" role="form" class="space-y-3 text-left">
@@ -123,10 +123,6 @@ $tailwindBrowserUrl = $cdnBase . '/npm/@tailwindcss/browser@4';
                                     <?php _e('登录'); ?>
                                 </button>
                             </form>
-                        <?php } else { ?>
-                            <div class="alert alert-warning">
-                                <span><?php _e('当前站点已启用强制单点登录，本地账号入口已关闭'); ?></span>
-                            </div>
                         <?php } ?>
 
                     </div>
