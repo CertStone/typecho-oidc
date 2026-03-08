@@ -13,7 +13,7 @@ $pluginConfig = $options->plugin('Oidc');
 $systemName = !empty($pluginConfig->oidcSystemName) ? $pluginConfig->oidcSystemName : 'OIDC';
 $nativeAuthDisabled = !empty($pluginConfig->disableNativeAuthPages) && $pluginConfig->disableNativeAuthPages === '1';
 $loginAction = $nativeAuthDisabled ? Common::url('/oidc/login', $options->index) : $options->loginAction;
-$referer = Common::url('admin/', $options->index);
+$referer = $options->adminUrl;
 $loginUrl = Common::url('/oidc/login', $options->index);
 $cdnBase = !empty($pluginConfig->uiCdnBase) ? rtrim($pluginConfig->uiCdnBase, '/') : 'https://s4.zstatic.net';
 $backgroundUrl = !empty($pluginConfig->loginBackgroundUrl) ? $pluginConfig->loginBackgroundUrl : '';

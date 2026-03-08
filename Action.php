@@ -45,7 +45,7 @@ class Action extends Base implements ActionInterface
     {
         // 检查用户是否登录
         if (!$this->user->hasLogin()) {
-            $this->response->redirect(Common::url('admin/login.php', $this->options->index));
+            $this->response->redirect($this->options->loginUrl);
             exit;
         }
 
@@ -181,8 +181,7 @@ class Action extends Base implements ActionInterface
         }
 
         if ($this->user->hasLogin()) {
-            $adminUrl = Common::url('admin/', $this->options->index);
-            $this->response->redirect($adminUrl);
+            $this->response->redirect($this->options->adminUrl);
             exit;
         }
 
@@ -198,7 +197,7 @@ class Action extends Base implements ActionInterface
     {
         if (!$this->isUserUnbindAllowed()) {
             $this->notice->set(_t('当前站点不允许解绑 OIDC 账户'), 'error');
-            $this->response->redirect(Common::url('admin/extending.php?panel=Oidc%2FPanel.php', $this->options->index));
+            $this->response->redirect($this->getOidcPanelUrl());
             exit;
         }
 
@@ -210,7 +209,7 @@ class Action extends Base implements ActionInterface
 
         if ($bindingId <= 0) {
             $this->notice->set(_t('无效的绑定ID'), 'error');
-            $this->response->redirect(Common::url('admin/extending.php?panel=Oidc%2FPanel.php', $this->options->index));
+            $this->response->redirect($this->getOidcPanelUrl());
             exit;
         }
 
@@ -232,7 +231,7 @@ class Action extends Base implements ActionInterface
         }
 
         // 重定向回管理面板
-        $this->response->redirect(Common::url('admin/extending.php?panel=Oidc%2FPanel.php', $this->options->index));
+        $this->response->redirect($this->getOidcPanelUrl());
         exit;
     }
 
@@ -277,8 +276,7 @@ class Action extends Base implements ActionInterface
 
                 if ($this->user->hasLogin()) {
                     // 登录成功，跳转到后台
-                    $adminUrl = Common::url('admin/', $this->options->index);
-                    $this->response->redirect($adminUrl);
+                    $this->response->redirect($this->options->adminUrl);
                 } else {
                     $this->loginError('登录失败，请重试');
                 }
@@ -340,8 +338,7 @@ class Action extends Base implements ActionInterface
             $this->notice->set(_t('OIDC 账户绑定成功'), 'success');
 
             // 绑定成功，跳转到 OIDC 绑定管理面板
-            $panelUrl = Common::url('admin/extending.php?panel=Oidc%2FPanel.php', $this->options->index);
-            $this->response->redirect($panelUrl);
+            $this->response->redirect($this->getOidcPanelUrl());
 
         } catch (Exception $e) {
             error_log('OIDC 绑定错误: ' . $e->getMessage());
@@ -450,8 +447,7 @@ class Action extends Base implements ActionInterface
         $this->user->simpleLogin($uid, false);
 
         if ($this->user->hasLogin()) {
-            $adminUrl = Common::url('admin/', $this->options->index);
-            $this->response->redirect($adminUrl);
+            $this->response->redirect($this->options->adminUrl);
             exit;
         }
 
@@ -754,7 +750,7 @@ class Action extends Base implements ActionInterface
      */
     private function getAutoRegisterGroup()
     {
-        $allowedGroups = array('subscriber', 'contributor', 'editor', 'administrator');
+        $allowedGroups = array('subscriber', 'contributor', 'editor');
         $group = !empty($this->pluginConfig->autoRegisterGroup) ? (string) $this->pluginConfig->autoRegisterGroup : 'subscriber';
 
         if (!in_array($group, $allowedGroups, true)) {
@@ -762,6 +758,16 @@ class Action extends Base implements ActionInterface
         }
 
         return $group;
+    }
+
+    /**
+     * 获取 OIDC 绑定面板 URL（兼容自定义后台目录）
+     *
+     * @return string
+     */
+    private function getOidcPanelUrl()
+    {
+        return Common::url('extending.php?panel=Oidc%2FPanel.php', $this->options->adminUrl);
     }
 
     /**

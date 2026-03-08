@@ -18,11 +18,12 @@ include 'menu.php';
 // 获取配置
 $options = Options::alloc();
 $pluginConfig = $options->plugin('Oidc');
+$panelUrl = Common::url('extending.php?panel=Oidc%2FPanel.php', $options->adminUrl);
 
 // 获取当前用户
 $user = User::alloc();
 if (!$user->hasLogin()) {
-    header('Location: ' . Common::url('admin/login.php', $options->index));
+    header('Location: ' . $options->loginUrl);
     exit;
 }
 
@@ -107,7 +108,7 @@ $systemName = !empty($pluginConfig->oidcSystemName) ? $pluginConfig->oidcSystemN
                                                 style="display: inline;">
                                                 <?php Security::alloc()->to($security); ?>
                                                 <input type="hidden" name="_"
-                                                    value="<?php echo $security->getToken(Common::url('admin/extending.php?panel=Oidc%2FPanel.php', $options->index)); ?>" />
+                                                    value="<?php echo $security->getToken($panelUrl); ?>" />
                                                 <input type="hidden" name="binding_id" value="<?php echo $binding['id']; ?>" />
                                                 <button type="submit" class="unbind-btn">
                                                     <?php _e('解绑'); ?>

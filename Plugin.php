@@ -36,6 +36,8 @@ class Plugin implements PluginInterface
     {
         // 拦截后台原生登录/注册页（可配置开关）
         TypechoPlugin::factory('admin/common.php')->begin = array(__CLASS__, 'interceptNativeAuthPages');
+        // 拦截后台原生登录/注册页（兼容部分版本/别名写法）
+        TypechoPlugin::factory('admin/common.php')->call_begin = array(__CLASS__, 'interceptNativeAuthPages');
 
         // 注册 Action 路由（用于 unbind 等管理操作）
         Helper::addAction('oidc', 'Oidc_Action');
@@ -234,7 +236,7 @@ class Plugin implements PluginInterface
             array('0' => _t('否'), '1' => _t('是')),
             '0',
             _t('是否禁用 Typecho 原生登录和注册页'),
-            _t('启用后访问 /admin/login.php 与 /admin/register.php 会重定向到 /oidc/login-page。为避免首次登录死锁，建议同时开启自动注册')
+            _t('启用后访问原生 login.php / register.php 会重定向到 /oidc/login-page（兼容自定义后台目录）。为避免首次登录死锁，建议同时开启自动注册')
         );
         $form->addInput($disableNativeAuthPages);
 
@@ -332,7 +334,16 @@ class Plugin implements PluginInterface
         }
 
         $scriptName = isset($_SERVER['SCRIPT_NAME']) ? basename((string) $_SERVER['SCRIPT_NAME']) : '';
-        if ($scriptName !== 'login.php' && $scriptName !== 'register.php') {
+        $requestUri = isset($_SERVER['REQUEST_URI']) ? (string) $_SERVER['REQUEST_URI'] : '';
+        $requestPath = parse_url($requestUri, PHP_URL_PATH);
+        if (!is_string($requestPath)) {
+            $requestPath = '';
+        }
+
+        $isNativeLoginPage = $scriptName === 'login.php' || preg_match('#/login\.php$#i', $requestPath) === 1;
+        $isNativeRegisterPage = $scriptName === 'register.php' || preg_match('#/register\.php$#i', $requestPath) === 1;
+
+        if (!$isNativeLoginPage && !$isNativeRegisterPage) {
             return;
         }
 
@@ -353,12 +364,6 @@ class Plugin implements PluginInterface
 
             $pluginEnabled = empty($pluginConfig->enablePlugin) || $pluginConfig->enablePlugin === '1';
             if (!$pluginEnabled) {
-                return false;
-            }
-
-            // 避免配置组合死锁：关闭自动注册时仍需保留原生本地登录入口
-            $autoRegisterEnabled = !empty($pluginConfig->enableAutoRegister) && $pluginConfig->enableAutoRegister === '1';
-            if (!$autoRegisterEnabled) {
                 return false;
             }
 
