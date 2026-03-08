@@ -196,6 +196,12 @@ class Action extends Base implements ActionInterface
      */
     public function unbind()
     {
+        if (!$this->isUserUnbindAllowed()) {
+            $this->notice->set(_t('当前站点不允许解绑 OIDC 账户'), 'error');
+            $this->response->redirect(Common::url('admin/extending.php?panel=Oidc%2FPanel.php', $this->options->index));
+            exit;
+        }
+
         $bindingId = $this->request->get('binding_id');
         if (empty($bindingId)) {
             $bindingId = $this->request->post('binding_id');
@@ -418,7 +424,7 @@ class Action extends Base implements ActionInterface
                     'created' => time(),
                     'activated' => time(),
                     'logged' => 0,
-                    'group' => 'subscriber'
+                    'group' => $this->getAutoRegisterGroup()
                 ))
         );
 
@@ -729,6 +735,33 @@ class Action extends Base implements ActionInterface
     private function isAutoRegisterEnabled()
     {
         return !empty($this->pluginConfig->enableAutoRegister) && $this->pluginConfig->enableAutoRegister === '1';
+    }
+
+    /**
+     * 是否允许用户解绑 OIDC 账户
+     *
+     * @return bool
+     */
+    private function isUserUnbindAllowed()
+    {
+        return !empty($this->pluginConfig->allowUserUnbind) && $this->pluginConfig->allowUserUnbind === '1';
+    }
+
+    /**
+     * 获取自动注册用户组
+     *
+     * @return string
+     */
+    private function getAutoRegisterGroup()
+    {
+        $allowedGroups = array('subscriber', 'contributor', 'editor', 'administrator');
+        $group = !empty($this->pluginConfig->autoRegisterGroup) ? (string) $this->pluginConfig->autoRegisterGroup : 'subscriber';
+
+        if (!in_array($group, $allowedGroups, true)) {
+            return 'subscriber';
+        }
+
+        return $group;
     }
 
     /**

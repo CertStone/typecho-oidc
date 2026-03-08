@@ -101,17 +101,21 @@ $systemName = !empty($pluginConfig->oidcSystemName) ? $pluginConfig->oidcSystemN
                                         <?php echo date('Y-m-d H:i:s', $binding['created_at']); ?>
                                     </td>
                                     <td>
-                                        <form method="post"
-                                            action="<?php echo Common::url('action/oidc?do=unbind', $options->index); ?>"
-                                            style="display: inline;">
-                                            <?php Security::alloc()->to($security); ?>
-                                            <input type="hidden" name="_"
-                                                value="<?php echo $security->getToken(Common::url('admin/extending.php?panel=Oidc%2FPanel.php', $options->index)); ?>" />
-                                            <input type="hidden" name="binding_id" value="<?php echo $binding['id']; ?>" />
-                                            <button type="submit" class="unbind-btn">
-                                                <?php _e('解绑'); ?>
-                                            </button>
-                                        </form>
+                                        <?php if (!empty($pluginConfig->allowUserUnbind) && $pluginConfig->allowUserUnbind === '1'): ?>
+                                            <form method="post"
+                                                action="<?php echo Common::url('action/oidc?do=unbind', $options->index); ?>"
+                                                style="display: inline;">
+                                                <?php Security::alloc()->to($security); ?>
+                                                <input type="hidden" name="_"
+                                                    value="<?php echo $security->getToken(Common::url('admin/extending.php?panel=Oidc%2FPanel.php', $options->index)); ?>" />
+                                                <input type="hidden" name="binding_id" value="<?php echo $binding['id']; ?>" />
+                                                <button type="submit" class="unbind-btn">
+                                                    <?php _e('解绑'); ?>
+                                                </button>
+                                            </form>
+                                        <?php else: ?>
+                                            <span style="color: #999;"><?php _e('已禁用'); ?></span>
+                                        <?php endif; ?>
                                     </td>
                                 </tr>
                             <?php endforeach; ?>
@@ -125,7 +129,11 @@ $systemName = !empty($pluginConfig->oidcSystemName) ? $pluginConfig->oidcSystemN
                     <ul style="margin: 5px 0; padding-left: 20px; color: #666; font-size: 13px; line-height: 1.8;">
                         <li><?php _e('绑定 %s 账户后，可以使用该账户快速登录', $systemName); ?></li>
                         <li><?php _e('一个 Typecho 账户只能绑定一个 %s 账户', $systemName); ?></li>
-                        <li><?php _e('解绑后，将无法使用该 %s 账户登录，但不影响其他登录方式', $systemName); ?></li>
+                        <?php if (!empty($pluginConfig->allowUserUnbind) && $pluginConfig->allowUserUnbind === '1'): ?>
+                            <li><?php _e('解绑后，将无法使用该 %s 账户登录，但不影响其他登录方式', $systemName); ?></li>
+                        <?php else: ?>
+                            <li><?php _e('当前站点不允许用户解绑 %s 账户', $systemName); ?></li>
+                        <?php endif; ?>
                     </ul>
                 </div>
 
@@ -172,4 +180,3 @@ include 'common-js.php';
 <?php
 include 'footer.php';
 ?>
-

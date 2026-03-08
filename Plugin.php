@@ -3,6 +3,7 @@ namespace TypechoPlugin\Oidc;
 
 use Typecho\Common;
 use Typecho\Db;
+use Typecho\Plugin as TypechoPlugin;
 use Typecho\Plugin\Exception;
 use Typecho\Plugin\PluginInterface;
 use Typecho\Widget\Helper\Form;
@@ -33,6 +34,9 @@ class Plugin implements PluginInterface
      */
     public static function activate()
     {
+        // 拦截后台原生登录/注册页（可配置开关）
+        TypechoPlugin::factory('admin/common.php')->begin = array(__CLASS__, 'interceptNativeAuthPages');
+
         // 注册 Action 路由（用于 unbind 等管理操作）
         Helper::addAction('oidc', 'Oidc_Action');
 
@@ -212,6 +216,37 @@ class Plugin implements PluginInterface
         );
         $form->addInput($enableAutoRegister);
 
+        $autoRegisterGroup = new Form\Element\Select(
+            'autoRegisterGroup',
+            array(
+                'subscriber' => _t('subscriber（订阅者）'),
+                'contributor' => _t('contributor（贡献者）'),
+                'editor' => _t('editor（编辑）')
+            ),
+            'subscriber',
+            _t('OIDC 自动注册用户组'),
+            _t('当启用自动注册时，新建用户将使用此用户组（默认不提供 administrator，建议通过后台人工提升）')
+        );
+        $form->addInput($autoRegisterGroup);
+
+        $disableNativeAuthPages = new Form\Element\Radio(
+            'disableNativeAuthPages',
+            array('0' => _t('否'), '1' => _t('是')),
+            '0',
+            _t('是否禁用 Typecho 原生登录和注册页'),
+            _t('启用后访问 /admin/login.php 与 /admin/register.php 会重定向到 /oidc/login-page。为避免首次登录死锁，建议同时开启自动注册')
+        );
+        $form->addInput($disableNativeAuthPages);
+
+        $allowUserUnbind = new Form\Element\Radio(
+            'allowUserUnbind',
+            array('0' => _t('否'), '1' => _t('是')),
+            '0',
+            _t('是否允许用户解绑 OIDC 账户'),
+            _t('默认不允许。关闭后，用户在绑定页面将无法执行解绑操作')
+        );
+        $form->addInput($allowUserUnbind);
+
         $enablePkce = new Form\Element\Radio(
             'enablePkce',
             array('0' => _t('关闭'), '1' => _t('开启')),
@@ -286,4 +321,51 @@ class Plugin implements PluginInterface
     public static function personalConfig(Form $form)
     {
     }
+
+    /**
+     * 拦截 Typecho 原生登录/注册页
+     */
+    public static function interceptNativeAuthPages()
+    {
+        if (!self::shouldDisableNativeAuthPages()) {
+            return;
+        }
+
+        $scriptName = isset($_SERVER['SCRIPT_NAME']) ? basename((string) $_SERVER['SCRIPT_NAME']) : '';
+        if ($scriptName !== 'login.php' && $scriptName !== 'register.php') {
+            return;
+        }
+
+        $options = Options::alloc();
+        $target = Common::url('/oidc/login-page', $options->index);
+        header('Location: ' . $target);
+        exit;
+    }
+
+    /**
+     * 是否启用原生登录/注册页拦截
+     */
+    private static function shouldDisableNativeAuthPages()
+    {
+        try {
+            $options = Options::alloc();
+            $pluginConfig = $options->plugin('Oidc');
+
+            $pluginEnabled = empty($pluginConfig->enablePlugin) || $pluginConfig->enablePlugin === '1';
+            if (!$pluginEnabled) {
+                return false;
+            }
+
+            // 避免配置组合死锁：关闭自动注册时仍需保留原生本地登录入口
+            $autoRegisterEnabled = !empty($pluginConfig->enableAutoRegister) && $pluginConfig->enableAutoRegister === '1';
+            if (!$autoRegisterEnabled) {
+                return false;
+            }
+
+            return !empty($pluginConfig->disableNativeAuthPages) && $pluginConfig->disableNativeAuthPages === '1';
+        } catch (\Throwable $e) {
+            return false;
+        }
+    }
+
 }
