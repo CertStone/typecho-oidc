@@ -155,6 +155,10 @@ class Action extends Base implements ActionInterface
             $this->loginError('获取 Access Token 失败');
         }
 
+        if (!empty($tokenData['id_token']) && is_string($tokenData['id_token'])) {
+            $_SESSION['oidc_last_id_token'] = $tokenData['id_token'];
+        }
+
         // 使用 Access Token 获取用户信息
         $userInfo = $this->getUserInfo($tokenData['access_token']);
         if (empty($userInfo)) {
@@ -194,6 +198,45 @@ class Action extends Base implements ActionInterface
 
         $this->startSession();
         include dirname(__FILE__) . '/LoginPage.php';
+        exit;
+    }
+
+    /**
+     * 统一登出：Typecho 本地退出 + 跳转 IdP/账户中心退出
+     */
+    public function logout()
+    {
+        $this->startSession();
+
+        // 优先读取用户当前绑定 provider 信息
+        $issuer = null;
+        if ($this->user->hasLogin()) {
+            try {
+                $db = Db::get();
+                $prefix = $db->getPrefix();
+                $binding = $db->fetchRow(
+                    $db->select('iss')
+                        ->from($prefix . 'oidc_bindings')
+                        ->where('uid = ?', $this->user->uid)
+                        ->limit(1)
+                );
+                if (!empty($binding['iss'])) {
+                    $issuer = (string) $binding['iss'];
+                }
+            } catch (\Throwable $e) {
+                error_log('OIDC: 获取绑定 issuer 失败 - ' . $e->getMessage());
+            }
+        }
+
+        // 本地先登出
+        if ($this->user->hasLogin()) {
+            $this->user->logout();
+        }
+        @session_destroy();
+
+        $postLogoutRedirect = Common::url('/', $this->options->index);
+        $target = $this->buildUnifiedLogoutTarget($issuer, $postLogoutRedirect);
+        $this->response->redirect($target);
         exit;
     }
 
@@ -664,6 +707,46 @@ class Action extends Base implements ActionInterface
         return $discoveryData;
     }
 
+    /**
+     * 按 issuer 获取发现文档
+     *
+     * @param string $issuer
+     * @return array|false
+     */
+    private function getDiscoveryDataByIssuer($issuer)
+    {
+        $issuer = trim((string) $issuer);
+        if ($issuer === '' || !filter_var($issuer, FILTER_VALIDATE_URL)) {
+            return false;
+        }
+
+        $url = rtrim($issuer, '/') . '/.well-known/openid-configuration';
+        $ch = curl_init();
+        curl_setopt($ch, CURLOPT_URL, $url);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 10);
+        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 5);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, true);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 2);
+        curl_setopt($ch, CURLOPT_FOLLOWLOCATION, false);
+
+        $response = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $curlError = curl_error($ch);
+        curl_close($ch);
+
+        if (!empty($curlError) || $httpCode !== 200 || empty($response)) {
+            return false;
+        }
+
+        $data = json_decode($response, true);
+        if (json_last_error() !== JSON_ERROR_NONE || !is_array($data)) {
+            return false;
+        }
+
+        return $data;
+    }
+
     // ==================== 私有验证和工具方法 ====================
 
     /**
@@ -994,6 +1077,89 @@ class Action extends Base implements ActionInterface
         }
 
         return $returnTo;
+    }
+
+    /**
+     * 生成统一登出目标地址
+     *
+     * @param string|null $issuer
+     * @param string $postLogoutRedirect
+     * @return string
+     */
+    private function buildUnifiedLogoutTarget($issuer, $postLogoutRedirect)
+    {
+        if (!$this->isAccountCenterTakeoverEnabled()) {
+            return $postLogoutRedirect;
+        }
+
+        $configured = !empty($this->pluginConfig->accountCenterLogoutUrl) ? trim((string) $this->pluginConfig->accountCenterLogoutUrl) : '';
+        if ($this->isAllowedLogoutUrl($configured, true)) {
+            return $configured;
+        }
+
+        $discoveryData = false;
+        if (!empty($issuer)) {
+            $discoveryData = $this->getDiscoveryDataByIssuer((string) $issuer);
+        }
+
+        if (!$discoveryData) {
+            $discoveryData = $this->getDiscoveryData();
+        }
+
+        if (is_array($discoveryData) && !empty($discoveryData['end_session_endpoint'])) {
+            $endpoint = (string) $discoveryData['end_session_endpoint'];
+            if ($this->isAllowedLogoutUrl($endpoint, false)) {
+                $sep = strpos($endpoint, '?') === false ? '?' : '&';
+                $target = $endpoint . $sep . 'post_logout_redirect_uri=' . rawurlencode($postLogoutRedirect);
+                if (!empty($_SESSION['oidc_last_id_token']) && is_string($_SESSION['oidc_last_id_token'])) {
+                    $target .= '&id_token_hint=' . rawurlencode($_SESSION['oidc_last_id_token']);
+                }
+                return $target;
+            }
+        }
+
+        return $postLogoutRedirect;
+    }
+
+    /**
+     * 登出 URL 白名单校验
+     *
+     * @param string $url
+     * @param bool $enforceSameHost 是否要求与账户中心 URL 同 host
+     * @return bool
+     */
+    private function isAllowedLogoutUrl($url, $enforceSameHost)
+    {
+        $url = trim((string) $url);
+        if ($url === '' || !filter_var($url, FILTER_VALIDATE_URL)) {
+            return false;
+        }
+
+        $parts = parse_url($url);
+        if (!is_array($parts) || empty($parts['scheme']) || empty($parts['host'])) {
+            return false;
+        }
+
+        $scheme = strtolower((string) $parts['scheme']);
+        if ($scheme !== 'http' && $scheme !== 'https') {
+            return false;
+        }
+
+        if (!$enforceSameHost) {
+            return true;
+        }
+
+        $accountCenterUrl = !empty($this->pluginConfig->accountCenterUrl) ? trim((string) $this->pluginConfig->accountCenterUrl) : '';
+        if ($accountCenterUrl === '' || !filter_var($accountCenterUrl, FILTER_VALIDATE_URL)) {
+            return false;
+        }
+
+        $centerParts = parse_url($accountCenterUrl);
+        if (!is_array($centerParts) || empty($centerParts['host'])) {
+            return false;
+        }
+
+        return strtolower((string) $parts['host']) === strtolower((string) $centerParts['host']);
     }
 
     /**

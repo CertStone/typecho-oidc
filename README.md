@@ -63,6 +63,8 @@ git clone https://github.com/CertStone/typecho-oidc.git Oidc
   - 保留：`/oidc/login-page` 同时展示“单点登录 + 本地账号登录”
   - 不保留：访问 `/oidc/login-page` 将直接跳转到单点登录，不再展示本地账号登录表单
 - `账户中心 URL`：你的 IdP 账户中心地址（用于“前往账户中心设置”按钮）
+- `账户中心登出 URL（可选）`：用于统一登出，开启接管时优先跳转该地址
+  - 出于安全考虑，建议与“账户中心 URL”同域名
 - `使用独立账户中心接管用户个人资料设置`：开启后，Typecho 个人设置页会隐藏“个人资料/密码修改/撰写设置”，改为“前往账户中心设置”按钮，并提示“重新登录后生效”
 - `是否允许用户解绑 OIDC 账户`：默认“否”，适用于强制 SSO 场景
 
@@ -106,6 +108,7 @@ git clone https://github.com/CertStone/typecho-oidc.git Oidc
 2. 页面中的“个人资料”“密码修改”“撰写设置”区域会被隐藏
 3. 页面顶部显示“前往账户中心设置”按钮
 4. 页面提示：在账户中心修改后，请重新登录以生效
+5. 触发 Typecho 退出时，将统一跳转到账户中心/IdP 登出端点（若配置了账户中心登出 URL 则优先使用）
 
 建议在 IdP 中确保以下字段稳定可用：
 
@@ -139,8 +142,16 @@ git clone https://github.com/CertStone/typecho-oidc.git Oidc
 - `name`（可选，映射 Typecho screenName）
 - `website`（可选，映射 Typecho url）
 
-本插件目前 **未实现 OIDC 退出登录（end_session_endpoint）**，因此 **Post Logout Redirect URIs** 不会被使用。
-如果你在 IdP 中需要填写，可使用以下地址作为默认回跳：
+本插件已支持统一登出：
+
+- 当开启“账户中心接管”后，访问 Typecho 原生退出入口会被接管到 `/oidc/logout`
+- `/oidc/logout` 会先执行 Typecho 本地退出，再尝试跳转：
+  1. 后台配置的“账户中心登出 URL”（若已填写）
+  2. OIDC discovery 中的 `end_session_endpoint`（自动拼接 `post_logout_redirect_uri`）
+  3. 站点首页（兜底）
+- 若 IdP 支持 RP-Initiated Logout，插件会附加 `id_token_hint`（当本次会话中可用时）以提高统一登出成功率
+
+如果你在 IdP 中配置 **Post Logout Redirect URIs**，建议加入以下地址：
 
 ```
 <你的站点地址>/

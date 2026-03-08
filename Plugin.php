@@ -19,7 +19,7 @@ if (!defined('__TYPECHO_ROOT_DIR__')) {
  *
  * @package Oidc
  * @author CertStone和uy/sun
- * @version 0.4.0
+ * @version 0.4.1
  * @since 1.2.0
  * @link https://github.com/CertStone/typecho-oidc
  */
@@ -49,6 +49,7 @@ class Plugin implements PluginInterface
         Helper::addRoute('oidc_login', '/oidc/login', 'Oidc_Action', 'login');
         Helper::addRoute('oidc_callback', '/oidc/callback', 'Oidc_Action', 'callback');
         Helper::addRoute('oidc_login_page', '/oidc/login-page', 'Oidc_Action', 'loginPage');
+        Helper::addRoute('oidc_logout', '/oidc/logout', 'Oidc_Action', 'logout');
 
         // 添加管理面板
         Helper::addPanel(1, 'Oidc/Panel.php', _t('OIDC 绑定'), _t('管理 OIDC 账户绑定'), 'subscriber');
@@ -133,6 +134,7 @@ class Plugin implements PluginInterface
         Helper::removeRoute('oidc_login');
         Helper::removeRoute('oidc_callback');
         Helper::removeRoute('oidc_login_page');
+        Helper::removeRoute('oidc_logout');
 
         // 移除管理面板
         Helper::removePanel(1, 'Oidc/Panel.php');
@@ -261,6 +263,15 @@ class Plugin implements PluginInterface
         );
         $form->addInput($accountCenterUrl);
 
+        $accountCenterLogoutUrl = new Form\Element\Text(
+            'accountCenterLogoutUrl',
+            null,
+            '',
+            _t('账户中心登出 URL（可选）'),
+            _t('若填写，接管模式下将优先跳转此地址实现统一登出；留空则尝试使用 OIDC end_session_endpoint')
+        );
+        $form->addInput($accountCenterLogoutUrl);
+
         $enableAccountCenterTakeover = new Form\Element\Radio(
             'enableAccountCenterTakeover',
             array('0' => _t('关闭'), '1' => _t('开启')),
@@ -382,7 +393,46 @@ class Plugin implements PluginInterface
     public static function onAdminCommonBegin()
     {
         self::interceptNativeAuthPages();
+        self::interceptNativeLogoutPage();
         self::interceptProfilePageForAccountCenterTakeover();
+    }
+
+    /**
+     * 拦截 Typecho 原生退出页并接管统一登出
+     */
+    public static function interceptNativeLogoutPage()
+    {
+        $scriptName = isset($_SERVER['SCRIPT_NAME']) ? basename((string) $_SERVER['SCRIPT_NAME']) : '';
+        $requestUri = isset($_SERVER['REQUEST_URI']) ? (string) $_SERVER['REQUEST_URI'] : '';
+        $requestPath = parse_url($requestUri, PHP_URL_PATH);
+        if (!is_string($requestPath)) {
+            $requestPath = '';
+        }
+
+        $isLogoutPage = $scriptName === 'logout.php' || preg_match('#/logout\.php$#i', $requestPath) === 1;
+        if (!$isLogoutPage) {
+            return;
+        }
+
+        $options = Options::alloc();
+        $pluginConfig = $options->plugin('Oidc');
+
+        $pluginEnabled = empty($pluginConfig->enablePlugin) || $pluginConfig->enablePlugin === '1';
+        if (!$pluginEnabled) {
+            return;
+        }
+
+        if (empty($pluginConfig->enableAccountCenterTakeover) || $pluginConfig->enableAccountCenterTakeover !== '1') {
+            return;
+        }
+
+        if (!self::isAccountCenterTakeoverReady($pluginConfig)) {
+            return;
+        }
+
+        $target = Common::url('/oidc/logout', $options->index);
+        header('Location: ' . $target);
+        exit;
     }
 
     /**
