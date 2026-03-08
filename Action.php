@@ -75,7 +75,7 @@ class Action extends Base implements ActionInterface
             $this->loginError('插件已禁用，请联系管理员');
         }
         // 检查配置是否完整
-        if (empty($this->pluginConfig->discoveryUrl) && empty($this->pluginConfig->clientId)) {
+        if (empty($this->pluginConfig->discoveryUrl) || empty($this->pluginConfig->clientId) || empty($this->pluginConfig->clientSecret)) {
             $this->loginError('OIDC 配置不完整，请联系管理员');
         }
 
@@ -179,6 +179,13 @@ class Action extends Base implements ActionInterface
         if (!$this->isPluginEnabled()) {
             $this->loginError('插件已禁用，请联系管理员');
         }
+
+        if ($this->user->hasLogin()) {
+            $adminUrl = Common::url('admin/', $this->options->index);
+            $this->response->redirect($adminUrl);
+            exit;
+        }
+
         $this->startSession();
         include dirname(__FILE__) . '/LoginPage.php';
         exit;
