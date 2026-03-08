@@ -56,7 +56,7 @@ $tailwindBrowserUrl = $cdnBase . '/npm/@tailwindcss/browser@4';
             <div class="hero-overlay bg-base-100/30"></div>
         <?php } ?>
         <div class="hero-content w-full px-3 py-8 sm:px-6 md:px-8">
-            <div class="w-full max-w-[48rem]">
+            <div class="w-full max-w-[33rem]">
                 <div class="card w-full rounded-3xl border border-base-300/60 bg-base-100 shadow-2xl backdrop-blur-sm">
                     <div class="card-body space-y-5 p-6 sm:p-8 md:p-10">
                         <div class="border-b border-base-300/70 pb-6 text-center space-y-3">
@@ -71,7 +71,7 @@ $tailwindBrowserUrl = $cdnBase . '/npm/@tailwindcss/browser@4';
                             </p>
                         </div>
 
-                        <div class="mx-auto w-full max-w-3xl space-y-4">
+                        <div class="mx-auto w-full max-w-[19rem] space-y-4">
                         <?php if (!empty($noticeMessages)) { ?>
                             <div class="alert <?php echo $noticeType === 'error' ? 'alert-error' : ($noticeType === 'success' ? 'alert-success' : 'alert-info'); ?>">
                                 <span><?php echo htmlspecialchars((string) $noticeMessages[0]); ?></span>
