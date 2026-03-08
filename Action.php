@@ -82,6 +82,8 @@ class Action extends Base implements ActionInterface
         // 确保 session 已启动
         $this->startSession();
 
+        $this->captureLoginContext();
+
         // 生成 state 参数
         $state = bin2hex(random_bytes(16));
 
@@ -280,8 +282,9 @@ class Action extends Base implements ActionInterface
                 $this->user->simpleLogin($binding['uid'], false);
 
                 if ($this->user->hasLogin()) {
+                    $this->syncTypechoProfileByUserInfo((int) $binding['uid'], $userInfo);
                     // 登录成功，跳转到后台
-                    $this->response->redirect($this->options->adminUrl);
+                    $this->redirectAfterLogin($this->options->adminUrl);
                 } else {
                     $this->loginError('登录失败，请重试');
                 }
@@ -290,7 +293,7 @@ class Action extends Base implements ActionInterface
                     $uid = $this->autoRegisterUser($userInfo);
                     if ($uid) {
                         $this->bindUser($uid, $userInfo);
-                        $this->loginByUid($uid);
+                        $this->loginByUid($uid, $userInfo);
                         return;
                     }
                 }
@@ -334,6 +337,8 @@ class Action extends Base implements ActionInterface
 
             $this->bindUser($this->user->uid, $userInfo);
 
+            $this->syncTypechoProfileByUserInfo((int) $this->user->uid, $userInfo);
+
             // 确保用户已登录
             if (!$this->user->hasLogin()) {
                 $this->user->simpleLogin($this->user->uid, false);
@@ -343,7 +348,7 @@ class Action extends Base implements ActionInterface
             $this->notice->set(_t('OIDC 账户绑定成功'), 'success');
 
             // 绑定成功，跳转到 OIDC 绑定管理面板
-            $this->response->redirect($this->getOidcPanelUrl());
+            $this->redirectAfterLogin($this->getOidcPanelUrl());
 
         } catch (Exception $e) {
             error_log('OIDC 绑定错误: ' . $e->getMessage());
@@ -446,14 +451,17 @@ class Action extends Base implements ActionInterface
      *
      * @param int $uid
      */
-    private function loginByUid($uid)
+    private function loginByUid($uid, $userInfo = null)
     {
         session_regenerate_id(true);
         $this->user->simpleLogin($uid, false);
 
         if ($this->user->hasLogin()) {
-            $this->response->redirect($this->options->adminUrl);
-            exit;
+            if (is_array($userInfo)) {
+                $this->syncTypechoProfileByUserInfo((int) $uid, $userInfo);
+            }
+
+            $this->redirectAfterLogin($this->options->adminUrl);
         }
 
         $this->loginError('登录失败，请重试');
@@ -739,6 +747,41 @@ class Action extends Base implements ActionInterface
     }
 
     /**
+     * 是否启用账户中心接管
+     *
+     * @return bool
+     */
+    private function isAccountCenterTakeoverEnabled()
+    {
+        if (!$this->isPluginEnabled()) {
+            return false;
+        }
+
+        if (empty($this->pluginConfig->enableAccountCenterTakeover) || $this->pluginConfig->enableAccountCenterTakeover !== '1') {
+            return false;
+        }
+
+        if (empty($this->pluginConfig->disableNativeAuthPages) || $this->pluginConfig->disableNativeAuthPages !== '1') {
+            return false;
+        }
+
+        if (empty($this->pluginConfig->keepNativePasswordLogin) || $this->pluginConfig->keepNativePasswordLogin !== '0') {
+            return false;
+        }
+
+        if (!empty($this->pluginConfig->allowUserUnbind) && $this->pluginConfig->allowUserUnbind !== '0') {
+            return false;
+        }
+
+        $accountCenterUrl = !empty($this->pluginConfig->accountCenterUrl) ? trim((string) $this->pluginConfig->accountCenterUrl) : '';
+        if ($accountCenterUrl === '' || !filter_var($accountCenterUrl, FILTER_VALIDATE_URL)) {
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
      * 是否保留本地账号登录入口
      *
      * @return bool
@@ -773,6 +816,184 @@ class Action extends Base implements ActionInterface
         }
 
         return $group;
+    }
+
+    /**
+     * 根据 IdP 用户信息刷新 Typecho 资料
+     *
+     * @param int $uid
+     * @param array $userInfo
+     */
+    private function syncTypechoProfileByUserInfo($uid, $userInfo)
+    {
+        if (!$this->isAccountCenterTakeoverEnabled()) {
+            return;
+        }
+
+        $updates = array();
+
+        $emailClaim = $this->getClaimName('emailClaim');
+        $email = $this->getClaimValue($userInfo, $emailClaim);
+        if (!empty($email) && filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            $updates['mail'] = $this->truncateValue($email, 200);
+        }
+
+        $screenNameClaim = $this->getClaimName('nicknameClaim');
+        $screenName = $this->getClaimValue($userInfo, $screenNameClaim);
+        if (!empty($screenName)) {
+            $sanitizedScreenName = trim(strip_tags((string) $screenName));
+            $sanitizedScreenName = preg_replace('/[\x00-\x1F\x7F]/u', '', $sanitizedScreenName);
+            $sanitizedScreenName = $this->truncateValue($sanitizedScreenName, 32);
+            if ($sanitizedScreenName !== '') {
+                $updates['screenName'] = $sanitizedScreenName;
+            }
+        }
+
+        $homepageClaim = $this->getClaimName('homepageClaim');
+        $homepage = $this->getClaimValue($userInfo, $homepageClaim);
+        if (!empty($homepage) && is_string($homepage)) {
+            $homepage = trim($homepage);
+            if (filter_var($homepage, FILTER_VALIDATE_URL)) {
+                $homepageParts = parse_url($homepage);
+                $scheme = isset($homepageParts['scheme']) ? strtolower((string) $homepageParts['scheme']) : '';
+                if ($scheme === 'http' || $scheme === 'https') {
+                    $updates['url'] = $this->truncateValue($homepage, 200);
+                }
+            }
+        }
+
+        if (empty($updates)) {
+            return;
+        }
+
+        $db = Db::get();
+        $prefix = $db->getPrefix();
+        $db->query(
+            $db->update($prefix . 'users')
+                ->rows($updates)
+                ->where('uid = ?', $uid)
+        );
+    }
+
+    /**
+     * 捕获登录上下文（用于 profile 页面回跳）
+     */
+    private function captureLoginContext()
+    {
+        if (!$this->request->is('sync_profile=1')) {
+            unset($_SESSION['oidc_login_context']);
+            return;
+        }
+
+        $returnTo = $this->sanitizeReturnTo((string) $this->request->get('return_to'));
+        $_SESSION['oidc_login_context'] = array(
+            'sync_profile' => 1,
+            'return_to' => $returnTo,
+            'expires_at' => time() + 300
+        );
+    }
+
+    /**
+     * 消费登录上下文
+     *
+     * @return array|null
+     */
+    private function consumeLoginContext()
+    {
+        if (empty($_SESSION['oidc_login_context']) || !is_array($_SESSION['oidc_login_context'])) {
+            return null;
+        }
+
+        $context = $_SESSION['oidc_login_context'];
+        unset($_SESSION['oidc_login_context']);
+
+        if (empty($context['expires_at']) || (int) $context['expires_at'] < time()) {
+            return null;
+        }
+
+        return $context;
+    }
+
+    /**
+     * 登录后跳转
+     *
+     * @param string $defaultUrl
+     */
+    private function redirectAfterLogin($defaultUrl)
+    {
+        $context = $this->consumeLoginContext();
+        if (
+            !empty($context)
+            && !empty($context['sync_profile'])
+            && !empty($context['return_to'])
+            && $this->sanitizeReturnTo((string) $context['return_to']) !== ''
+        ) {
+            $returnTo = (string) $context['return_to'];
+            $separator = strpos($returnTo, '?') === false ? '?' : '&';
+            $this->response->redirect($returnTo . $separator . 'oidc_synced=1');
+            exit;
+        }
+
+        $this->response->redirect($defaultUrl);
+        exit;
+    }
+
+    /**
+     * 校验回跳 URL 安全性
+     *
+     * @param string $returnTo
+     * @return string
+     */
+    private function sanitizeReturnTo($returnTo)
+    {
+        $returnTo = trim($returnTo);
+        if ($returnTo === '') {
+            return '';
+        }
+
+        if (strlen($returnTo) > 1000) {
+            return '';
+        }
+
+        $parsed = parse_url($returnTo);
+        if (!is_array($parsed)) {
+            return '';
+        }
+
+        if (empty($parsed['scheme']) || empty($parsed['host'])) {
+            return '';
+        }
+
+        $scheme = strtolower((string) $parsed['scheme']);
+        if ($scheme !== 'http' && $scheme !== 'https') {
+            return '';
+        }
+
+        $adminParsed = parse_url($this->options->adminUrl);
+        if (!is_array($adminParsed) || empty($adminParsed['host'])) {
+            return '';
+        }
+
+        $host = strtolower((string) $parsed['host']);
+        $adminHost = strtolower((string) $adminParsed['host']);
+        if ($host !== $adminHost) {
+            return '';
+        }
+
+        $port = isset($parsed['port']) ? (int) $parsed['port'] : ($scheme === 'https' ? 443 : 80);
+        $adminScheme = isset($adminParsed['scheme']) ? strtolower((string) $adminParsed['scheme']) : $scheme;
+        $adminPort = isset($adminParsed['port']) ? (int) $adminParsed['port'] : ($adminScheme === 'https' ? 443 : 80);
+        if ($port !== $adminPort) {
+            return '';
+        }
+
+        $adminPathPrefix = isset($adminParsed['path']) ? rtrim((string) $adminParsed['path'], '/') : '';
+        $path = isset($parsed['path']) ? (string) $parsed['path'] : '';
+        if ($adminPathPrefix !== '' && strpos($path, $adminPathPrefix) !== 0) {
+            return '';
+        }
+
+        return $returnTo;
     }
 
     /**

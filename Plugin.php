@@ -39,6 +39,11 @@ class Plugin implements PluginInterface
         // 拦截后台原生登录/注册页（兼容部分版本/别名写法）
         TypechoPlugin::factory('admin/common.php')->call_begin = array(__CLASS__, 'interceptNativeAuthPages');
 
+        // 账户中心接管个人资料页
+        TypechoPlugin::factory('admin/profile.php')->begin = array(__CLASS__, 'interceptProfilePageForAccountCenterTakeover');
+        TypechoPlugin::factory('admin/profile.php')->call_begin = array(__CLASS__, 'interceptProfilePageForAccountCenterTakeover');
+        TypechoPlugin::factory('admin/profile.php')->bottom = array(__CLASS__, 'renderProfileTakeoverHint');
+
         // 注册 Action 路由（用于 unbind 等管理操作）
         Helper::addAction('oidc', 'Oidc_Action');
 
@@ -249,6 +254,24 @@ class Plugin implements PluginInterface
         );
         $form->addInput($keepNativePasswordLogin);
 
+        $accountCenterUrl = new Form\Element\Text(
+            'accountCenterUrl',
+            null,
+            '',
+            _t('账户中心 URL'),
+            _t('例如：https://idp.example.com/account')
+        );
+        $form->addInput($accountCenterUrl);
+
+        $enableAccountCenterTakeover = new Form\Element\Radio(
+            'enableAccountCenterTakeover',
+            array('0' => _t('关闭'), '1' => _t('开启')),
+            '0',
+            _t('使用独立账户中心接管用户个人资料设置'),
+            _t('启用后将隐藏 Typecho 原生“个人资料/密码修改”并显示“前往账户中心设置”。<br>请谨慎开启，且必须满足：<br>1) 禁用 Typecho 原生登录和注册页=是<br>2) 保留 Typecho 原生账号登录功能=不保留<br>3) 允许用户解绑 OIDC 账户=否<br>4) 已填写账户中心 URL')
+        );
+        $form->addInput($enableAccountCenterTakeover);
+
         $allowUserUnbind = new Form\Element\Radio(
             'allowUserUnbind',
             array('0' => _t('否'), '1' => _t('是')),
@@ -334,6 +357,120 @@ class Plugin implements PluginInterface
     }
 
     /**
+     * 账户中心接管：访问 profile 页面时触发同步
+     */
+    public static function interceptProfilePageForAccountCenterTakeover()
+    {
+        $options = Options::alloc();
+        $pluginConfig = $options->plugin('Oidc');
+
+        $pluginEnabled = empty($pluginConfig->enablePlugin) || $pluginConfig->enablePlugin === '1';
+        if (!$pluginEnabled) {
+            return;
+        }
+
+        if (empty($pluginConfig->enableAccountCenterTakeover) || $pluginConfig->enableAccountCenterTakeover !== '1') {
+            return;
+        }
+
+        if (!self::isAccountCenterTakeoverReady($pluginConfig)) {
+            return;
+        }
+
+        $requestMethod = isset($_SERVER['REQUEST_METHOD']) ? strtoupper((string) $_SERVER['REQUEST_METHOD']) : 'GET';
+        $profileUrl = Common::url('profile.php', $options->adminUrl);
+
+        if ($requestMethod === 'POST') {
+            \Widget\Notice::alloc()->set(_t('个人资料和密码由账户中心管理，请前往账户中心修改'), 'notice');
+            $separator = strpos($profileUrl, '?') === false ? '?' : '&';
+            header('Location: ' . $profileUrl . $separator . 'oidc_synced=1');
+            exit;
+        }
+
+        $synced = isset($_GET['oidc_synced']) ? (string) $_GET['oidc_synced'] : '';
+        if ($synced === '1') {
+            return;
+        }
+
+        $requestUri = isset($_SERVER['REQUEST_URI']) ? (string) $_SERVER['REQUEST_URI'] : '';
+        $currentUrl = self::buildCurrentAbsoluteUrl($requestUri, $options->siteUrl);
+        if ($currentUrl === '') {
+            $currentUrl = $profileUrl;
+        }
+
+        $loginUrl = Common::url('/oidc/login', $options->index);
+        $target = $loginUrl . '?sync_profile=1&return_to=' . rawurlencode($currentUrl);
+        header('Location: ' . $target);
+        exit;
+    }
+
+    /**
+     * 账户中心接管：在 profile 页面渲染按钮和提示
+     */
+    public static function renderProfileTakeoverHint()
+    {
+        $options = Options::alloc();
+        $pluginConfig = $options->plugin('Oidc');
+
+        $pluginEnabled = empty($pluginConfig->enablePlugin) || $pluginConfig->enablePlugin === '1';
+        if (!$pluginEnabled) {
+            return;
+        }
+
+        if (empty($pluginConfig->enableAccountCenterTakeover) || $pluginConfig->enableAccountCenterTakeover !== '1') {
+            return;
+        }
+
+        $errors = self::getAccountCenterTakeoverErrors($pluginConfig);
+        if (!empty($errors)) {
+            $listHtml = '<ul style="margin:8px 0 0 18px;">';
+            foreach ($errors as $item) {
+                $listHtml .= '<li>' . htmlspecialchars($item) . '</li>';
+            }
+            $listHtml .= '</ul>';
+            echo '<div class="message error"><p><strong>' . _t('账户中心接管未生效，原因：') . '</strong></p>' . $listHtml . '</div>';
+            return;
+        }
+
+        $accountCenterUrl = self::sanitizeAccountCenterUrl((string) $pluginConfig->accountCenterUrl);
+        if ($accountCenterUrl === '') {
+            return;
+        }
+
+        $accountCenterUrlJson = json_encode($accountCenterUrl);
+        $title = _t('账户中心已接管个人资料设置');
+        $desc = _t('请前往账户中心修改个人资料和密码，修改后请重新登录以生效。');
+        $buttonText = _t('前往账户中心设置');
+        ?>
+        <script>
+            (function () {
+                var panel = document.querySelector('.typecho-content-panel');
+                if (!panel) {
+                    return;
+                }
+
+                var sections = panel.querySelectorAll('section');
+                sections.forEach(function (section) {
+                    var h3 = section.querySelector('h3');
+                    var title = h3 ? (h3.textContent || '').trim() : '';
+                    if (section.id === 'change-password' || section.id === 'writing-option' || title === '个人资料') {
+                        section.style.display = 'none';
+                    }
+                });
+
+                var wrapper = document.createElement('div');
+                wrapper.className = 'message notice';
+                wrapper.innerHTML = '<p><strong><?php echo addslashes($title); ?></strong></p>'
+                    + '<p style="margin-top:6px;"><?php echo addslashes($desc); ?></p>'
+                    + '<p style="margin-top:10px;"><a class="btn primary" href=' + <?php echo $accountCenterUrlJson; ?> + '><?php echo addslashes($buttonText); ?></a></p>';
+
+                panel.insertBefore(wrapper, panel.firstChild);
+            })();
+        </script>
+        <?php
+    }
+
+    /**
      * 拦截 Typecho 原生登录/注册页
      */
     public static function interceptNativeAuthPages()
@@ -380,6 +517,80 @@ class Plugin implements PluginInterface
         } catch (\Throwable $e) {
             return false;
         }
+    }
+
+    /**
+     * 账户中心接管是否满足生效条件
+     */
+    private static function isAccountCenterTakeoverReady($pluginConfig)
+    {
+        return empty(self::getAccountCenterTakeoverErrors($pluginConfig));
+    }
+
+    /**
+     * 返回账户中心接管未满足的条件
+     */
+    private static function getAccountCenterTakeoverErrors($pluginConfig)
+    {
+        $errors = array();
+
+        if (empty($pluginConfig->disableNativeAuthPages) || $pluginConfig->disableNativeAuthPages !== '1') {
+            $errors[] = _t('未开启“禁用 Typecho 原生登录和注册页”');
+        }
+
+        if (empty($pluginConfig->keepNativePasswordLogin) || $pluginConfig->keepNativePasswordLogin !== '0') {
+            $errors[] = _t('“是否保留 Typecho 原生账号登录功能”未设置为“不保留”');
+        }
+
+        if (!empty($pluginConfig->allowUserUnbind) && $pluginConfig->allowUserUnbind !== '0') {
+            $errors[] = _t('“是否允许用户解绑 OIDC 账户”未设置为“否”');
+        }
+
+        $accountCenterUrl = self::sanitizeAccountCenterUrl(!empty($pluginConfig->accountCenterUrl) ? (string) $pluginConfig->accountCenterUrl : '');
+        if ($accountCenterUrl === '') {
+            $errors[] = _t('“账户中心 URL”未配置或格式无效');
+        }
+
+        return $errors;
+    }
+
+    /**
+     * 校验并清理账户中心 URL
+     */
+    private static function sanitizeAccountCenterUrl($url)
+    {
+        $url = trim($url);
+        if ($url === '') {
+            return '';
+        }
+
+        if (!filter_var($url, FILTER_VALIDATE_URL)) {
+            return '';
+        }
+
+        return $url;
+    }
+
+    /**
+     * 构建当前请求绝对 URL
+     */
+    private static function buildCurrentAbsoluteUrl($requestUri, $siteUrl)
+    {
+        $requestUri = trim((string) $requestUri);
+        if ($requestUri === '') {
+            return '';
+        }
+
+        if (preg_match('#^https?://#i', $requestUri)) {
+            return $requestUri;
+        }
+
+        $base = rtrim((string) $siteUrl, '/');
+        if ($base === '') {
+            return '';
+        }
+
+        return $base . '/' . ltrim($requestUri, '/');
     }
 
 }
