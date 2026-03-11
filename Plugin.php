@@ -19,7 +19,7 @@ if (!defined('__TYPECHO_ROOT_DIR__')) {
  *
  * @package Oidc
  * @author CertStone和uy/sun
- * @version 0.4.1
+ * @version 0.4.2
  * @since 1.2.0
  * @link https://github.com/CertStone/typecho-oidc
  */

@@ -96,7 +96,7 @@ $systemName = !empty($pluginConfig->oidcSystemName) ? $pluginConfig->oidcSystemN
                                     </td>
                                     <td>
                                         <code
-                                            style="background: #f5f5f5; padding: 2px 6px; border-radius: 3px; font-size: 12px;"><?php echo htmlspecialchars($binding['sub']); ?></code>
+                                            style="background: #1f2937; padding: 2px 6px; border-radius: 3px; font-size: 12px;"><?php echo htmlspecialchars($binding['sub']); ?></code>
                                     </td>
                                     <td class="kit-hidden-mb">
                                         <?php echo date('Y-m-d H:i:s', $binding['created_at']); ?>
