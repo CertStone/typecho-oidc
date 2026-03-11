@@ -332,6 +332,12 @@ class Action extends Base implements ActionInterface
                     $this->loginError('登录失败，请重试');
                 }
             } else {
+                // 当前已登录用户点击“绑定”时，应优先进入绑定流程，避免误走自动注册分支
+                if ($this->user->hasLogin()) {
+                    $this->handleBinding($userInfo);
+                    return;
+                }
+
                 if ($this->isAutoRegisterEnabled()) {
                     $uid = $this->autoRegisterUser($userInfo);
                     if ($uid) {
