@@ -244,3 +244,9 @@ flowchart TD
 - `administrator`：最高权限（强烈不建议作为自动注册默认组）
 
 建议默认使用低权限组，再通过后台审批或同步策略提升权限。
+
+
+## 致谢
+
+感谢 [typecho-oidc](https://github.com/he0119/typecho-oidc) 插件提供的思路和 OIDC 核心代码实现，当前插件在其基础上进行了重构和功能增强。
+
